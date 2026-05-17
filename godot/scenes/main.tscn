@@ -39,6 +39,11 @@ anchor_bottom = 1.0
 offset_bottom = -114.0
 grow_horizontal = 2
 grow_vertical = 2
+bbcode_enabled = true
+text = "																						Welcome in new Gamesa launcher (version 3.0)
+																									Now better by look and function"
+fit_content = true
+scroll_active = false
 
 [node name="VersionOptionButton" type="OptionButton" parent="."]
 layout_mode = 1
@@ -52,6 +57,7 @@ offset_bottom = -40.0
 grow_vertical = 0
 theme = ExtResource("1_o5qli")
 selected = 0
+fit_to_longest_item = false
 allow_reselect = true
 item_count = 1
 popup/item_0/text = "Latest"
@@ -87,6 +93,32 @@ grow_horizontal = 0
 grow_vertical = 0
 text = "Odinstalovat"
 
+[node name="PreReleasesCheckBox" type="CheckBox" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 283.0
+offset_top = -91.0
+offset_right = 452.0
+offset_bottom = -60.0
+grow_vertical = 0
+text = "Show Pre-releases"
+
+[node name="ForceInstallCheckBox" type="CheckBox" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 283.0
+offset_top = -57.0
+offset_right = 452.0
+offset_bottom = -26.0
+grow_vertical = 0
+text = "Force Install"
+
 [connection signal="item_selected" from="VersionOptionButton" to="." method="_on_version_option_button_item_selected"]
 [connection signal="pressed" from="PlayButton" to="." method="_on_play_button_pressed"]
 [connection signal="pressed" from="UninstallButton" to="." method="_on_uninstall_button_pressed"]
+[connection signal="toggled" from="PreReleasesCheckBox" to="." method="_on_prereleases_toggled"]
+[connection signal="toggled" from="ForceInstallCheckBox" to="." method="_on_force_install_toggled"]
