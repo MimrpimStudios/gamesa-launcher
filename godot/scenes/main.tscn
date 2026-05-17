@@ -1,7 +1,16 @@
-[gd_scene load_steps=3 format=3 uid="uid://b6adw8tmsp4e6"]
+[gd_scene load_steps=12 format=3 uid="uid://b6adw8tmsp4e6"]
 
 [ext_resource type="Script" uid="uid://bscy72urharpn" path="res://scenes/main.gd" id="1_0wfyh"]
 [ext_resource type="Theme" uid="uid://bdk1i5g2l7sqq" path="res://assets/resources/styles/main.theme" id="1_o5qli"]
+[ext_resource type="Texture2D" uid="uid://if5cp53rypse" path="res://assets/textures/dirt.png" id="2_ya4ey"]
+[ext_resource type="Texture2D" uid="uid://bor2tiu2e1mhk" path="res://assets/textures/grass1.png" id="3_eb6dy"]
+[ext_resource type="Texture2D" uid="uid://cx4b252jpmn0u" path="res://assets/textures/grass2.png" id="4_trceg"]
+[ext_resource type="Texture2D" uid="uid://1xwuirb6xrpq" path="res://assets/textures/grass3.png" id="5_a8y0u"]
+[ext_resource type="Texture2D" uid="uid://bkfsf0y6ht42o" path="res://assets/textures/dirt1.png" id="6_jkv2x"]
+[ext_resource type="Texture2D" uid="uid://d1cljcw0rf8h8" path="res://assets/textures/dirt2.png" id="7_jbj1t"]
+[ext_resource type="Texture2D" uid="uid://yphe33kecpij" path="res://assets/textures/dirt3.png" id="8_muem4"]
+[ext_resource type="Texture2D" uid="uid://cp17gkpomtdlb" path="res://assets/textures/dirt4.png" id="9_dp3eg"]
+[ext_resource type="Texture2D" uid="uid://d188rlghx7kry" path="res://assets/textures/dirt5.png" id="10_0ld40"]
 
 [node name="main" type="Control"]
 layout_mode = 3
@@ -20,6 +29,152 @@ offset_bottom = 532.0
 grow_horizontal = 2
 color = Color(0.3328807, 0.33288068, 0.33288068, 1)
 
+[node name="TextureRect" type="TextureRect" parent="ColorRect"]
+visible = false
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_ya4ey")
+stretch_mode = 1
+
+[node name="TextureRect2" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -1136.0
+offset_bottom = -516.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_eb6dy")
+stretch_mode = 1
+
+[node name="TextureRect3" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_right = -16.0
+offset_bottom = -516.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_trceg")
+stretch_mode = 1
+
+[node name="TextureRect4" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 1136.0
+offset_bottom = -516.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("5_a8y0u")
+stretch_mode = 1
+
+[node name="TextureRect5" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 16.0
+offset_right = -1136.0
+offset_bottom = -500.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("6_jkv2x")
+stretch_mode = 1
+
+[node name="TextureRect6" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -500.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("7_jbj1t")
+stretch_mode = 1
+
+[node name="TextureRect7" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 1136.0
+offset_top = 16.0
+offset_bottom = -500.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("8_muem4")
+stretch_mode = 1
+
+[node name="TextureRect8" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 32.0
+offset_right = -1136.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("9_dp3eg")
+stretch_mode = 1
+
+[node name="TextureRect9" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 32.0
+offset_right = -16.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_ya4ey")
+stretch_mode = 1
+
+[node name="TextureRect10" type="TextureRect" parent="ColorRect"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 1136.0
+offset_top = 32.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("10_0ld40")
+stretch_mode = 1
+
+[node name="ColorRect3" type="ColorRect" parent="ColorRect"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 532.0
+grow_horizontal = 2
+color = Color(0.33333334, 0.33333334, 0.33333334, 0.49803922)
+
 [node name="ColorRect2" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 12
@@ -31,11 +186,34 @@ grow_horizontal = 2
 grow_vertical = 0
 color = Color(0.1728327, 0.17283267, 0.17283267, 1)
 
+[node name="TextureRect" type="TextureRect" parent="ColorRect2"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_ya4ey")
+stretch_mode = 1
+
+[node name="ColorRect3" type="ColorRect" parent="ColorRect2"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -113.0
+grow_horizontal = 2
+grow_vertical = 0
+color = Color(0.17254902, 0.17254902, 0.17254902, 0.79607844)
+
 [node name="RichTextLabel" type="RichTextLabel" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_top = 18.0
 offset_bottom = -114.0
 grow_horizontal = 2
 grow_vertical = 2
