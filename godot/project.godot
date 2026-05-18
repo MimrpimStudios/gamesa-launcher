@@ -15,7 +15,7 @@ general/updates_per_second=30
 [application]
 
 config/name="Gamesa Launcher"
-config/version="0.0.1"
+config/version="0.0.5"
 run/main_scene="uid://b6adw8tmsp4e6"
 config/features=PackedStringArray("4.5", "Forward Plus")
 boot_splash/show_image=false

@@ -1,6 +1,6 @@
 import os
 import json
-import download
+import download_launcher
 import platformdirs
 import sys
 import zipfile
@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 
-cli_version = "0.0.2"
+cli_version = "0.0.7"
 APPDATA = platformdirs.user_data_dir("Gamesa_launcher")
 os.makedirs(APPDATA, exist_ok=True)
 
@@ -27,6 +27,7 @@ def posli_vystup(status: str, zprava: str, data: dict = None):
             "data": data if data is not None else {}
         }
         print(json.dumps(vystup, ensure_ascii=False))
+        sys.stdout.flush()
     else:
         if status == "error":
             print(f"Chyba: {zprava}")
@@ -83,8 +84,8 @@ def load_versions():
         sys.stdout = open(os.devnull, 'w')
 
     try:
-        # Stahujeme kompletní seznam všech releasů
-        download.json("https://api.github.com/repos/mimrpimstudios/gamesa/releases", CESTA_RELEASES_JSON)
+        # Stahujeme kompletní seznam všech releasů z repozitáře mimrpimstudios
+        download_launcher.json("https://api.github.com/repos/mimrpimstudios/gamesa/releases", CESTA_RELEASES_JSON)
     except Exception as e:
         sys.stdout = stary_stdout
         posli_vystup("error", f"Síťová chyba při komunikaci s GitHub API: {e}")
@@ -226,23 +227,12 @@ def install_version(version: str):
         posli_vystup("success", f"Verze {version} už je nainstalovaná.", {"version": version})
         return
 
-    # Při instalaci záměrně neblokujeme stdout, pokud nejedeme v čistém JSON režimu,
-    # aby download.py mohl pohodlně vykreslovat progress bar do konzole.
-    stary_stdout = sys.stdout
-    if FORMAT_JSON:
-        sys.stdout = open(os.devnull, 'w')
-
-    # Pokusíme se o stažení souboru
+    # Spustíme stahování s předáním parametru, zda má běžet v JSON formátu
     try:
-        download.file(versions_data[version], vystupni_zip)
+        download_launcher.file(versions_data[version], vystupni_zip, format_json=FORMAT_JSON)
     except Exception as e:
-        if FORMAT_JSON:
-            sys.stdout = stary_stdout
         posli_vystup("error", f"Chyba při stahování souboru: {e}")
         return
-    finally:
-        if FORMAT_JSON and sys.stdout != stary_stdout:
-            sys.stdout = stary_stdout
 
     # Kontrola staženého archivu
     if not os.path.exists(vystupni_zip) or os.path.getsize(vystupni_zip) == 0:
@@ -285,11 +275,9 @@ def start_version(version: str, parametry: str = ""):
     parametry = parametry.strip() + f" -launcherCLI -versionCLI={cli_version}"
     cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
     spustitelny_soubor = os.path.join(cilova_slozka_hry, "Gamesa.exe")
-    print(str(parametry))
+    
     if os.path.exists(spustitelny_soubor):
         try:
-            # POUŽIJEME SUBPROCESS:
-            # - start_new_session=True zajistí, že hra poběží dál i po zavření launcheru
             # - cwd nastaví pracovní složku přímo do složky hry, takže správně načte assety
             subprocess.Popen(
                 [spustitelny_soubor] + parametry.split(),
@@ -319,12 +307,14 @@ if __name__ == "__main__":
         else:
             # Pokud voláme akce nad verzí, provedeme překlad zástupného slova 'latest'
             cilova_verze = resolve_version(argumenty[2])
-            parametry = resolve_version(argumenty[3])
+            
             if prikaz == "install":
                 install_version(cilova_verze)
             elif prikaz == "uninstall":
                 uninstall_version(cilova_verze)
             elif prikaz == "start":
+                # Bezpečné ošetření, pokud parametry pro start nebyly předány
+                parametry = resolve_version(argumenty[3]) if len(argumenty) > 3 else ""
                 start_version(cilova_verze, parametry)
             else:
                 posli_vystup("error", "Neznámý příkaz.")

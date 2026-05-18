@@ -6,22 +6,25 @@ extends Control
 @onready var uninstall: Button = $UninstallButton
 @onready var prereleases: CheckBox = $PreReleasesCheckBox
 @onready var force_install: CheckBox = $ForceInstallCheckBox
+@onready var progress_bar: ProgressBar = $ProgressBar
 
 var global_version = ProjectSettings.get_setting("application/config/version")
-var changelog_text = """																Welcome to the new Gamesa launcher (version """ + str(global_version) + """)
-																				Now better by look and function"""
+var changelog_text = """Welcome to the new Gamesa launcher (version """ + str(global_version) + """)
+Now better by look and function"""
+
 var data = null # Inicializujeme explicitně na null
 var data_downloaded
-var cesta_k_exe = "res://assets/bin/gamesa_launcher_cli.exe"
+var cesta_k_exe: String = ""
 var vybrana_verze: String = "" # Globální proměnná pro vybranou verzi
 var ma_prerelease_volbu: bool
+
 # Ikony pro různé typy verzí
 var latest = preload("uid://bdaly080dwtnr")
 var release = preload("uid://ca1xspl6ngldb")
 var prerelease = preload("uid://sg0lj3lbql4")
 
-# Sledování běžícího instalačního procesu na pozadí (-1 znamená, že nic neběží)
-var instalacni_pid: int = -1
+# Sledování běžícího instalačního procesu na pozadí pomocí komunikační roury (pipe)
+var instalacni_pipe: Dictionary = {}
 
 # Cesta ke konfiguračnímu souboru launcheru pro uložení nastavení a poslední vybrané verze
 var cesta_k_configu = "user://launcher_config.cfg"
@@ -33,15 +36,25 @@ var bg_thread: Thread
 var aktualni_skutecny_latest_tag: String = ""
 # Pomocná proměnná pro zjištění skutečného tagu verze, která odpovídá nejnovějšímu prerelease
 var aktualni_skutecny_latest_prerelease_tag: String = ""
+var aktualni_slozka_exe: String = ""
 
-func _ready():
+func _ready() -> void:
+	if OS.has_feature("editor"):
+		# V editoru chceme pracovat s kořenem projektu
+		aktualni_slozka_exe = ProjectSettings.globalize_path("res://")
+		cesta_k_exe = aktualni_slozka_exe + "assets/bin/gamesa_launcher_cli.exe"
+	else:
+		# Po exportu vezme reálnou složku vedle tvého vyexportovaného .exe
+		aktualni_slozka_exe = OS.get_executable_path().get_base_dir() + "/"
+		cesta_k_exe = aktualni_slozka_exe + "assets/bin/gamesa_launcher_cli.exe"
+		
+	print("Použitá složka: ", aktualni_slozka_exe)
+	
 	# Nastavení maximální velikosti ikon na rozměr běžného textu (16x16px)
 	set_changelog()
 	var popup = version.get_popup()
 	popup.add_theme_constant_override("icon_max_width", 16)
 	version.add_theme_constant_override("icon_max_width", 16)
-
-	# Propojení signálů pro filtry a vynucenou instalaci
 
 	# Načtení předchozího stavu CheckBoxů z konfigurace
 	nacti_nastaveni_filtru()
@@ -80,18 +93,48 @@ func _on_background_init_finished(loaded_data) -> void:
 		print("Nepodařilo se získat validní seznam verzí.")
 
 func _process(_delta: float) -> void:
-	# Každý snímek kontrolujeme, zda na pozadí stále běží stahování/instalace
-	if instalacni_pid != -1:
-		# Pokud proces s tímto PID už na pozadí neběží, znamená to, že skončil
-		if not OS.is_process_running(instalacni_pid):
-			print("Instalační proces (PID: ", instalacni_pid, ") na pozadí skončil!")
+	# Pokud máme aktivní komunikační rouru, instalace běží na pozadí
+	if instalacni_pipe.has("stdio"):
+		var pipe = instalacni_pipe["stdio"] as FileAccess
+		
+		# Čteme řádky z konzole Pythonu, dokud nějaké jsou k dispozici
+		while pipe.get_error() == OK and pipe.get_len() > 0:
+			var radek = pipe.get_line().strip_edges()
+			if radek == "": continue
 			
-			# Vynulujeme PID sledování
-			instalacni_pid = -1
-			play.disabled = false
-			
-			# Zavoláme výběr verze znovu, čímž se spustí příkaz "installed" a tlačítko se přepne na "Spustit hru"
-			_on_version_option_button_item_selected(version.selected)
+			# Pokusíme se řádek zpracovat jako JSON poslaný z Pythonu
+			var json = JSON.new()
+			if json.parse(radek) == OK:
+				var res = json.data
+				if res is Dictionary:
+					# Chytáme stav stahování pro progress bar
+					if res.get("status") == "progress":
+						var procenta = res.get("percent", 0)
+						if procenta >= 0:
+							progress_bar.value = procenta
+							
+					# Chytáme finální úspěch nebo chybu
+					elif res.get("status") == "success":
+						print("Instalace dokončena: ", res.get("message"))
+						ukonci_sledovani_instalace()
+					elif res.get("status") == "error":
+						print("Chyba při instalaci: ", res.get("message"))
+						ukonci_sledovani_instalace()
+
+		# Kontrola, zda proces na pozadí mezitím neumřel (např. neočekávaný crash)
+		var pid = instalacni_pipe.get("pid", -1)
+		if pid != -1 and not OS.is_process_running(pid):
+			# Proces skončil, ale nestihl poslat finální JSON (nebo spadl)
+			ukonci_sledovani_instalace()
+
+# Pomocná funkce pro vyčištění stavu po instalaci
+func ukonci_sledovani_instalace() -> void:
+	if instalacni_pipe.has("stdio"):
+		instalacni_pipe["stdio"].close()
+	instalacni_pipe = {}
+	play.disabled = false
+	progress_bar.value = 0
+	_on_version_option_button_item_selected(version.selected)
 
 func spusti_launcher(prikazy: Array) -> Dictionary:
 	var globalni_cesta = ProjectSettings.globalize_path(cesta_k_exe)
@@ -244,8 +287,8 @@ func _on_version_option_button_item_selected(index: int) -> void:
 func _on_play_button_pressed() -> void:
 	if vybrana_verze == "": return
 	
-	# Pokud zrovna probíhá instalace, zamezíme dalšímu klikání
-	if instalacni_pid != -1: return
+	# Pokud zrovna probíhá stahování, zamezíme dalšímu klikání
+	if instalacni_pipe.has("stdio"): return
 	
 	var globalni_cesta = ProjectSettings.globalize_path(cesta_k_exe)
 
@@ -258,59 +301,60 @@ func _on_play_button_pressed() -> void:
 
 	if play.text == "Stáhnout a instalovat" or play.text == "Reinstalovat":
 		play.disabled = true
+		progress_bar.value = 0 # Resetujeme bar
 		
-		# Pokud děláme Force Install (nebo je popisek tlačítka Reinstalovat), nejprve hru odinstalujeme
+		# Pokud děláme Force Install, nejprve staré soubory verze odinstalujeme
 		if play.text == "Reinstalovat" or (force_install and force_install.button_pressed):
 			play.text = "Odinstalování staré verze..."
-			print("Force Install: Odinstalovávám verzi ", verze_pro_prikaz, " před zahájením stahování.")
+			print("Force Install: Odinstalovávám verzi ", verze_pro_prikaz)
 			var uninstall_res = spusti_launcher(["uninstall", verze_pro_prikaz, "--json"])
 			if uninstall_res != null and uninstall_res.get("status") == "success":
 				print("Stará verze úspěšně odinstalována.")
 			else:
-				print("Předběžná odinstalace se nezdařila nebo nebyla nutná, pokračuji ve stahování.")
+				print("Předběžná odinstalace nebyla nutná, pokračuji ve stahování.")
 
 		play.text = "Stahování..."
 		
-		# Spustí se samostatný proces na pozadí, který neblokuje hlavní vlákno Godotu
-		instalacni_pid = OS.create_process(globalni_cesta, ["install", verze_pro_prikaz], false)
+		# Spouštíme proces přes rouru (pipe), abychom v _process() zachytávali procenta stahování
+		instalacni_pipe = OS.execute_with_pipe(globalni_cesta, ["install", verze_pro_prikaz, "--json"])
 		
-		if instalacni_pid != -1:
-			print("Instalace verze ", verze_pro_prikaz, " byla úspěšně spuštěna na pozadí pod PID: ", instalacni_pid)
+		if instalacni_pipe.has("stdio") and instalacni_pipe.get("pid", -1) != -1:
+			print("Instalace verze ", verze_pro_prikaz, " úspěšně spuštěna na pozadí (PID: ", instalacni_pipe["pid"], ")")
 		else:
 			print("Kritická chyba: Nepodařilo se vytvořit instalační proces.")
-			play.disabled = false
-			_on_version_option_button_item_selected(version.selected)
+			ukonci_sledovani_instalace()
+			
 	elif play.text == "Spustit hru":
-			print("Spouštím hru...")
-			
-			# Tady máš svůj string přesně tak, jak jsi potřeboval
-			var extra_args_string = "-launcherGUI -versionGUI=" + str(global_version)
-			
-			# Všechno posíláme jako parametry v poli pro OS.execute
-			var parametry = [
-				"start", 
-				verze_pro_prikaz, 
-				extra_args_string # Godot toto předá jako jeden ucelený textový argument
-			]
-			
-			# Prázdné pole pro zachycení textového výstupu (přesunuto na správnou pozici)
-			var vystup = []
-			
-			# Správné volání: cesta, pole parametrů, pole pro výstup
-			var exit_code = OS.execute(globalni_cesta, parametry, vystup, true, false)
-			
-			if exit_code == 0:
-				print("Hra úspěšně nahozena.")
-			else:
-				print("Hru se nepodařilo spustit. Exit kód: ", exit_code)
+		print("Spouštím hru...")
+		
+		# Spouštěcí argumenty pro CLI/GUI launchery hry Gamesa
+		var extra_args_string = "-launcherGUI -versionGUI=" + str(global_version)
+		
+		# Parametry předané jako pole v OS.execute()
+		var parametry = [
+			"start", 
+			verze_pro_prikaz, 
+			extra_args_string
+		]
+		
+		# Prázdné pole pro případný textový výstup
+		var vystup = []
+		
+		# Správné neblokující spuštění hry (cesta, parametry, výstup)
+		var exit_code = OS.execute(globalni_cesta, parametry, vystup, true, false)
+		
+		if exit_code == 0:
+			print("Hra úspěšně nahozena.")
+		else:
+			print("Hru se nepodařilo spustit. Exit kód: ", exit_code)
 
 func _on_uninstall_button_pressed() -> void:
 	if vybrana_verze == "":
 		print("Chyba: Není vybrána žádná verze pro odinstalaci.")
 		return
 		
-	# Pokud zrovna probíhá stahování jiné verze, raději odinstalaci zablokujeme
-	if instalacni_pid != -1:
+	# Pokud zrovna probíhá stahování jiné verze, odinstalaci zablokujeme
+	if instalacni_pipe.has("stdio"):
 		print("Nelze odinstalovat hru, dokud běží stahování.")
 		return
 
@@ -329,7 +373,6 @@ func _on_uninstall_button_pressed() -> void:
 	if uninstall_res != null and uninstall_res.has("status"):
 		if uninstall_res["status"] == "success":
 			print("Odinstalace úspěšná: ", uninstall_res.get("message", ""))
-			
 			# Obnovíme stav hlavního tlačítka (přepne se zpět na "Stáhnout a instalovat")
 			_on_version_option_button_item_selected(version.selected)
 		else:
@@ -382,7 +425,6 @@ func nacti_nastaveni_filtru() -> void:
 			prereleases.button_pressed = config.get_value("Filtry", "prereleases", true)
 		if force_install:
 			force_install.button_pressed = config.get_value("Filtry", "force_install", false)
-
 
 func _on_close_texture_button_pressed() -> void:
 	get_tree().quit(0)
