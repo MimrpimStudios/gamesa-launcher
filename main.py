@@ -280,19 +280,20 @@ def uninstall_version(version: str):
     else:
         posli_vystup("error", f"Verze {version} není nainstalována.")
 
-def start_version(version: str, parametry: str = f"-launcher --type=CLI --version={cli_version}"):
+def start_version(version: str, parametry: str = ""):
     """Spustí hru bezpečně, nezávisle a ve správném pracovním adresáři."""
+    parametry = parametry + f" -launcherCLI --versionCLI={cli_version}"
     cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
     spustitelny_soubor = os.path.join(cilova_slozka_hry, "Gamesa.exe")
-    
+    print(str(parametry))
     if os.path.exists(spustitelny_soubor):
         try:
             # POUŽIJEME SUBPROCESS:
             # - start_new_session=True zajistí, že hra poběží dál i po zavření launcheru
             # - cwd nastaví pracovní složku přímo do složky hry, takže správně načte assety
             subprocess.Popen(
-                [spustitelny_soubor], 
-                cwd=cilova_slozka_hry, 
+                [spustitelny_soubor] + parametry.split(),
+                cwd=cilova_slozka_hry,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
             )
             posli_vystup("success", f"Hra verze {version} byla spuštěna.", {"version": version})
@@ -318,13 +319,13 @@ if __name__ == "__main__":
         else:
             # Pokud voláme akce nad verzí, provedeme překlad zástupného slova 'latest'
             cilova_verze = resolve_version(argumenty[2])
-            
+            parametry = resolve_version(argumenty[3])
             if prikaz == "install":
                 install_version(cilova_verze)
             elif prikaz == "uninstall":
                 uninstall_version(cilova_verze)
             elif prikaz == "start":
-                start_version(cilova_verze)
+                start_version(cilova_verze, parametry)
             else:
                 posli_vystup("error", "Neznámý příkaz.")
     else:
