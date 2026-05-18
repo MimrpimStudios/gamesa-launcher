@@ -230,7 +230,7 @@ offset_bottom = -44.0
 grow_horizontal = 0
 grow_vertical = 0
 theme = ExtResource("1_o5qli")
-text = "Odinstalovat"
+text = "Uninstall"
 
 [node name="CloseTextureButton" type="TextureButton" parent="."]
 texture_filter = 1
