@@ -8,318 +8,318 @@ import shutil
 import subprocess
 
 
-cli_version = "0.0.7"
+cli_version = "1.0.0.0"
 APPDATA = platformdirs.user_data_dir("Gamesa_launcher")
 os.makedirs(APPDATA, exist_ok=True)
 
-CESTA_VERSIONS_JSON = os.path.join(APPDATA, "versions.json")
-CESTA_RELEASES_JSON = os.path.join(APPDATA, "releases.json")
-SLOZKA_VERSIONS = os.path.join(APPDATA, "Versions")
+VERSIONS_JSON_PATH = os.path.join(APPDATA, "versions.json")
+RELEASES_JSON_PATH = os.path.join(APPDATA, "releases.json")
+VERSIONS_DIR = os.path.join(APPDATA, "Versions")
 
 FORMAT_JSON = "--json" in sys.argv
 
-def posli_vystup(status: str, zprava: str, data: dict = None):
-    """Pomocná funkce pro unifikovaný výstup do Godotu (JSON) nebo konzole."""
+def send_output(status: str, message: str, data: dict = None):
+    """Helper function for unified output to Godot (JSON) or the console."""
     if FORMAT_JSON:
-        vystup = {
+        output = {
             "status": status,
-            "message": zprava,
+            "message": message,
             "data": data if data is not None else {}
         }
-        print(json.dumps(vystup, ensure_ascii=False))
+        print(json.dumps(output, ensure_ascii=False))
         sys.stdout.flush()
     else:
         if status == "error":
-            print(f"Chyba: {zprava}")
+            print(f"Error: {message}")
         else:
-            print(zprava)
+            print(message)
             
-    # Pokud dojde k chybě v CLI, ukončíme proces s chybovým kódem
+    # If an error occurs in the CLI, we terminate the process with an error code
     if status == "error":
         sys.exit(1)
 
 def resolve_version(version: str) -> str:
-    """Pokud je zadáno 'latest', vyhledá a vrátí skutečný nejnovější stabilní tag."""
+    """If 'latest' is specified, looks up and returns the actual latest stable tag."""
     if version.lower() != "latest":
         return version
 
-    if not os.path.exists(CESTA_VERSIONS_JSON) or not os.path.exists(CESTA_RELEASES_JSON):
-        posli_vystup("error", "Seznam verzí je prázdný. Spusťte nejdříve aktualizaci (update).")
+    if not os.path.exists(VERSIONS_JSON_PATH) or not os.path.exists(RELEASES_JSON_PATH):
+        send_output("error", "The version list is empty. Please run update first.")
         return version
 
     try:
-        with open(CESTA_VERSIONS_JSON, "r", encoding="utf-8") as f:
+        with open(VERSIONS_JSON_PATH, "r", encoding="utf-8") as f:
             versions_data = json.load(f)
-        with open(CESTA_RELEASES_JSON, "r", encoding="utf-8") as f:
-            vsechny_releases = json.load(f)
+        with open(RELEASES_JSON_PATH, "r", encoding="utf-8") as f:
+            all_releases = json.load(f)
     except Exception:
-        posli_vystup("error", "Nepodařilo se načíst lokální soubory pro zjištění verze 'latest'.")
+        send_output("error", "Failed to load local files to determine the 'latest' version.")
         return version
 
-    # Najdeme první stabilní verzi, která není prerelease a máme pro ni asset
-    skutecny_latest_tag = None
-    for release in vsechny_releases:
+    # Find the first stable version that is not a prerelease and has a matching asset
+    actual_latest_tag = None
+    for release in all_releases:
         tag = release.get("tag_name")
         if tag in versions_data and not release.get("prerelease", False):
-            skutecny_latest_tag = tag
+            actual_latest_tag = tag
             break
             
-    # Nouzový plán: pokud jsou všechny pre-release, vezmeme úplně první dostupnou verzi
-    if skutecny_latest_tag is None and vsechny_releases:
-        for release in vsechny_releases:
+    # Fallback plan: if all are pre-releases, take the very first available version
+    if actual_latest_tag is None and all_releases:
+        for release in all_releases:
             tag = release.get("tag_name")
             if tag in versions_data:
-                skutecny_latest_tag = tag
+                actual_latest_tag = tag
                 break
 
-    if skutecny_latest_tag:
-        return skutecny_latest_tag
+    if actual_latest_tag:
+        return actual_latest_tag
     
     return version
 
 def load_versions():
-    """Tento příkaz jako JEDINÝ stahuje z internetu. Stáhne VŠECHNY releasy z GitHubu."""
-    stary_stdout = sys.stdout
+    """This command is the ONLY one downloading from the internet. It fetches ALL GitHub releases."""
+    old_stdout = sys.stdout
     if FORMAT_JSON:
         sys.stdout = open(os.devnull, 'w')
 
     try:
-        # Stahujeme kompletní seznam všech releasů z repozitáře mimrpimstudios
-        download_launcher.json("https://api.github.com/repos/mimrpimstudios/gamesa/releases", CESTA_RELEASES_JSON)
+        # Fetching the complete list of all releases from the mimrpimstudios repository
+        download_launcher.json("https://api.github.com/repos/mimrpimstudios/gamesa/releases", RELEASES_JSON_PATH)
     except Exception as e:
-        sys.stdout = stary_stdout
-        posli_vystup("error", f"Síťová chyba při komunikaci s GitHub API: {e}")
+        sys.stdout = old_stdout
+        send_output("error", f"Network error during GitHub API communication: {e}")
         return
     finally:
         if FORMAT_JSON:
-            sys.stdout = stary_stdout
+            sys.stdout = old_stdout
 
-    if not os.path.exists(CESTA_RELEASES_JSON):
-        posli_vystup("error", "Nepodařilo se ověřit verze z internetu.")
+    if not os.path.exists(RELEASES_JSON_PATH):
+        send_output("error", "Failed to verify versions from the internet.")
         return
     
     try:
-        with open(CESTA_RELEASES_JSON, "r", encoding="utf-8") as f:
-            vsechny_releases = json.load(f)
+        with open(RELEASES_JSON_PATH, "r", encoding="utf-8") as f:
+            all_releases = json.load(f)
     except json.JSONDecodeError:
-        posli_vystup("error", "Soubor s verzemi z GitHubu je poškozený.")
+        send_output("error", "The GitHub version file is corrupted.")
         return
 
-    vysledny_slovnik = {}
+    result_dict = {}
 
-    # Projdeme úplně všechny nalezené releasy od nejnovějšího po nejstarší
-    for release in vsechny_releases:
-        verze = release.get("tag_name")
+    # Go through all found releases from newest to oldest
+    for release in all_releases:
+        version = release.get("tag_name")
         for asset in release.get("assets", []):
             if asset.get("name") == "Gamesa.zip":
                 link = asset.get("browser_download_url")
-                vysledny_slovnik[verze] = link
-                break  # Jakmile najdeme Gamesa.zip, skočíme na další release
+                result_dict[version] = link
+                break  # Once we find Gamesa.zip, we jump to the next release
 
-    # Uložíme kompletní seznam všech verzí do lokálního souboru
-    with open(CESTA_VERSIONS_JSON, "w", encoding="utf-8") as f:
-        json.dump(vysledny_slovnik, f, indent=4, ensure_ascii=False)
+    # Save the complete list of all versions to a local file
+    with open(VERSIONS_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(result_dict, f, indent=4, ensure_ascii=False)
         
-    pocet_verzi = len(vysledny_slovnik)
-    posli_vystup("success", f"Seznam verzí úspěšně aktualizován. Nalezeno {pocet_verzi} verzí.", {"total_versions": pocet_verzi})
+    version_count = len(result_dict)
+    send_output("success", f"Version list successfully updated. Found {version_count} versions.", {"total_versions": version_count})
 
 def list_versions():
-    """BEZ INTERNETU: Pouze otevře lokální soubory a vrátí VŠECHNY uložené verze se strukturou pro Godot."""
-    if not os.path.exists(CESTA_VERSIONS_JSON) or not os.path.exists(CESTA_RELEASES_JSON):
-        posli_vystup("error", "Seznam verzí je prázdný. Spusťte nejdříve aktualizaci (update).")
+    """OFFLINE ONLY: Simply opens local files and returns ALL saved versions structured for Godot."""
+    if not os.path.exists(VERSIONS_JSON_PATH) or not os.path.exists(RELEASES_JSON_PATH):
+        send_output("error", "The version list is empty. Please run update first.")
         return
 
     try:
-        with open(CESTA_VERSIONS_JSON, "r", encoding="utf-8") as f:
+        with open(VERSIONS_JSON_PATH, "r", encoding="utf-8") as f:
             versions_data = json.load(f)
-        with open(CESTA_RELEASES_JSON, "r", encoding="utf-8") as f:
-            vsechny_releases = json.load(f)
+        with open(RELEASES_JSON_PATH, "r", encoding="utf-8") as f:
+            all_releases = json.load(f)
     except json.JSONDecodeError:
-        posli_vystup("error", "Lokální datové soubory jsou poškozené.")
+        send_output("error", "Local data files are corrupted.")
         return
 
-    # Vytvoříme si mapování tagů na to, zda jsou na GitHubu označené jako prerelease
-    prerelease_map = {r.get("tag_name"): r.get("prerelease", False) for r in vsechny_releases}
+    # Create a mapping of tags to see whether they are marked as prerelease on GitHub
+    prerelease_map = {r.get("tag_name"): r.get("prerelease", False) for r in all_releases}
 
-    # Najdeme PRVNÍ release, který NENÍ označen jako prerelease. To je náš "Latest" (stabilní release)
-    skutecny_latest_tag = None
-    for release in vsechny_releases:
+    # Find the FIRST release that is NOT marked as a prerelease. This is our "Latest" (stable release)
+    actual_latest_tag = None
+    for release in all_releases:
         tag = release.get("tag_name")
-        # Musí to být verze, pro kterou máme stažený asset link ve versions_data
+        # It must be a version we have a downloaded asset link for in versions_data
         if tag in versions_data and not release.get("prerelease", False):
-            skutecny_latest_tag = tag
+            actual_latest_tag = tag
             break
             
-    # Pokud by náhodou byly všechny releasy označené jako prerelease, vezmeme jako nouzovku ten úplně první
-    if skutecny_latest_tag is None and vsechny_releases:
-        for release in vsechny_releases:
+    # If by any chance all releases are marked as prerelease, we take the absolute first one as fallback
+    if actual_latest_tag is None and all_releases:
+        for release in all_releases:
             tag = release.get("tag_name")
             if tag in versions_data:
-                skutecny_latest_tag = tag
+                actual_latest_tag = tag
                 break
 
-    strukturovany_seznam = []
-    # Projdeme verze a přiřadíme jim správný typ
-    for verze in versions_data.keys():
-        if verze == skutecny_latest_tag:
-            typ = "latest"
-        elif prerelease_map.get(verze, False):
-            typ = "prerelease"
+    structured_list = []
+    # Loop through versions and assign their respective types
+    for version in versions_data.keys():
+        if version == actual_latest_tag:
+            ver_type = "latest"
+        elif prerelease_map.get(version, False):
+            ver_type = "prerelease"
         else:
-            typ = "release"
+            ver_type = "release"
             
-        strukturovany_seznam.append({
-            "name": verze,
-            "type": typ
+        structured_list.append({
+            "name": version,
+            "type": ver_type
         })
 
     if FORMAT_JSON:
-        posli_vystup("success", "Seznam všech verzí načten z disku.", {"versions": strukturovany_seznam})
+        send_output("success", "Loaded all versions from disk.", {"versions": structured_list})
     else:
-        print("\n--- Všechny známé verze hry Gamesa ---")
-        for polozka in strukturovany_seznam:
-            print(f" • {polozka['name']} [{polozka['type']}]")
-        print("--------------------------------------\n")
+        print("\n--- All known Gamesa versions ---")
+        for item in structured_list:
+            print(f" • {item['name']} [{item['type']}]")
+        print("---------------------------------\n")
 
 def list_installed_versions():
-    """BEZ INTERNETU: Prohledá složku a zjistí, co je fyzicky staženo."""
-    nainstalovane = []
-    if os.path.exists(SLOZKA_VERSIONS):
-        nainstalovane = [
-            jmeno.replace("Gamesa_", "") 
-            for jmeno in os.listdir(SLOZKA_VERSIONS) 
-            if os.path.isdir(os.path.join(SLOZKA_VERSIONS, jmeno)) and jmeno.startswith("Gamesa_")
+    """OFFLINE ONLY: Scans the directory and detects what has been physically downloaded."""
+    installed = []
+    if os.path.exists(VERSIONS_DIR):
+        installed = [
+            name.replace("Gamesa_", "") 
+            for name in os.listdir(VERSIONS_DIR) 
+            if os.path.isdir(os.path.join(VERSIONS_DIR, name)) and name.startswith("Gamesa_")
         ]
 
     if FORMAT_JSON:
-        posli_vystup("success", "Seznam nainstalovaných verzí načten.", {"installed": nainstalovane})
+        send_output("success", "Installed versions list loaded.", {"installed": installed})
     else:
-        if not nainstalovane:
-            print("Nemáte nainstalovanou žádnou verzi.")
+        if not installed:
+            print("No versions are currently installed.")
             return
-        print("\n--- Nainstalované verze v PC ---")
-        for verze in nainstalovane:
-            print(f" • {verze}")
+        print("\n--- Installed versions on PC ---")
+        for version in installed:
+            print(f" • {version}")
         print("--------------------------------\n")
 
 def install_version(version: str):
-    """Stáhne konkrétní hru na základě odkazu z lokálního datového souboru."""
-    if not os.path.exists(CESTA_VERSIONS_JSON):
-        posli_vystup("error", "Soubor versions.json neexistuje. Spusťte nejdříve update.")
+    """Downloads a specific game version using the link from the local data file."""
+    if not os.path.exists(VERSIONS_JSON_PATH):
+        send_output("error", "The file versions.json does not exist. Please run update first.")
         return
 
     try:
-        with open(CESTA_VERSIONS_JSON, "r", encoding="utf-8") as f:
+        with open(VERSIONS_JSON_PATH, "r", encoding="utf-8") as f:
             versions_data = json.load(f)
     except Exception:
-        posli_vystup("error", "Nepodařilo se načíst lokální soubor versions.json.")
+        send_output("error", "Failed to load local file versions.json.")
         return
         
     if version not in versions_data:
-        posli_vystup("error", f"Verze {version} není v seznamu známých verzí.")
+        send_output("error", f"Version {version} is not in the list of known versions.")
         return
 
-    os.makedirs(SLOZKA_VERSIONS, exist_ok=True)
-    vystupni_zip = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}.zip")
-    cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
+    os.makedirs(VERSIONS_DIR, exist_ok=True)
+    output_zip = os.path.join(VERSIONS_DIR, f"Gamesa_{version}.zip")
+    target_game_dir = os.path.join(VERSIONS_DIR, f"Gamesa_{version}")
 
-    if os.path.exists(os.path.join(cilova_slozka_hry, "Gamesa.exe")):
-        posli_vystup("success", f"Verze {version} už je nainstalovaná.", {"version": version})
+    if os.path.exists(os.path.join(target_game_dir, "Gamesa.exe")):
+        send_output("success", f"Version {version} is already installed.", {"version": version})
         return
 
-    # Spustíme stahování s předáním parametru, zda má běžet v JSON formátu
+    # Start the download and pass whether it should run in JSON format
     try:
-        download_launcher.file(versions_data[version], vystupni_zip, format_json=FORMAT_JSON)
+        download_launcher.file(versions_data[version], output_zip, format_json=FORMAT_JSON)
     except Exception as e:
-        posli_vystup("error", f"Chyba při stahování souboru: {e}")
+        send_output("error", f"Error occurred during file download: {e}")
         return
 
-    # Kontrola staženého archivu
-    if not os.path.exists(vystupni_zip) or os.path.getsize(vystupni_zip) == 0:
-        posli_vystup("error", "Stažení selhalo (soubor nebyl vytvořen nebo je prázdný).")
+    # Check the downloaded archive
+    if not os.path.exists(output_zip) or os.path.getsize(output_zip) == 0:
+        send_output("error", "Download failed (file was not created or is empty).")
         return
     
-    # Rozbalení staženého ZIP souboru
+    # Extract the downloaded ZIP file
     try:
-        with zipfile.ZipFile(vystupni_zip, 'r') as zip_ref:
-            zip_ref.extractall(cilova_slozka_hry)
+        with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+            zip_ref.extractall(target_game_dir)
         
-        # Smazání ZIP souboru po úspěšné instalaci
-        if os.path.exists(vystupni_zip):
-            os.remove(vystupni_zip)
+        # Delete the ZIP file after a successful installation
+        if os.path.exists(output_zip):
+            os.remove(output_zip)
             
-        posli_vystup("success", f"Verze {version} byla úspěšně nainstalována.", {"version": version})
+        send_output("success", f"Version {version} has been successfully installed.", {"version": version})
         
     except zipfile.BadZipFile:
-        if os.path.exists(vystupni_zip):
-            os.remove(vystupni_zip)
-        posli_vystup("error", "Stažený soubor ZIP je poškozený.")
+        if os.path.exists(output_zip):
+            os.remove(output_zip)
+        send_output("error", "The downloaded ZIP file is corrupted.")
     except Exception as e:
-        posli_vystup("error", f"Chyba při rozbalování souboru: {e}")
+        send_output("error", f"Error occurred during file extraction: {e}")
 
 def uninstall_version(version: str):
-    """Odebere složku s hrou z disku."""
-    cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
+    """Deletes the game directory from the disk."""
+    target_game_dir = os.path.join(VERSIONS_DIR, f"Gamesa_{version}")
     
-    if os.path.exists(cilova_slozka_hry) and os.path.isdir(cilova_slozka_hry):
+    if os.path.exists(target_game_dir) and os.path.isdir(target_game_dir):
         try:
-            shutil.rmtree(cilova_slozka_hry)
-            posli_vystup("success", f"Verze {version} byla úspěšně odebrána.", {"version": version})
+            shutil.rmtree(target_game_dir)
+            send_output("success", f"Version {version} was successfully removed.", {"version": version})
         except Exception as e:
-            posli_vystup("error", f"Chyba při mazání složky: {e}")
+            send_output("error", f"Error occurred during directory deletion: {e}")
     else:
-        posli_vystup("error", f"Verze {version} není nainstalována.")
+        send_output("error", f"Version {version} is not installed.")
 
-def start_version(version: str, parametry: str = ""):
-    """Spustí hru bezpečně, nezávisle a ve správném pracovním adresáři."""
-    parametry = parametry.strip() + f" -launcherCLI -versionCLI={cli_version}"
-    cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
-    spustitelny_soubor = os.path.join(cilova_slozka_hry, "Gamesa.exe")
+def start_version(version: str, parameters: str = ""):
+    """Safely starts the game independently and within the correct working directory."""
+    parameters = parameters.strip() + f" -launcherCLI -versionCLI={cli_version}"
+    target_game_dir = os.path.join(VERSIONS_DIR, f"Gamesa_{version}")
+    executable_file = os.path.join(target_game_dir, "Gamesa.exe")
     
-    if os.path.exists(spustitelny_soubor):
+    if os.path.exists(executable_file):
         try:
-            # - cwd nastaví pracovní složku přímo do složky hry, takže správně načte assety
+            # cwd sets the working directory directly to the game folder so it loads assets correctly
             subprocess.Popen(
-                [spustitelny_soubor] + parametry.split(),
-                cwd=cilova_slozka_hry,
+                [executable_file] + parameters.split(),
+                cwd=target_game_dir,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
             )
-            posli_vystup("success", f"Hra verze {version} byla spuštěna.", {"version": version})
+            send_output("success", f"Game version {version} has been launched.", {"version": version})
         except Exception as e:
-            posli_vystup("error", f"Nepodařilo se spustit proces: {e}")
+            send_output("error", f"Failed to start the process: {e}")
     else:
-        posli_vystup("error", f"Spustitelný soubor pro verzi {version} nebyl nalezen.")
+        send_output("error", f"Executable for version {version} was not found.")
 
 if __name__ == "__main__":
-    argumenty = [arg for arg in sys.argv if arg != "--json"]
+    arguments = [arg for arg in sys.argv if arg != "--json"]
 
-    if len(argumenty) > 1:
-        prikaz = argumenty[1].lower()
+    if len(arguments) > 1:
+        command = arguments[1].lower()
         
-        if prikaz == "update":
+        if command == "update":
             load_versions()
-        elif prikaz == "versions":
+        elif command == "versions":
             list_versions()
-        elif prikaz == "installed":
+        elif command == "installed":
             list_installed_versions()
-        elif prikaz in ("install", "uninstall", "start") and len(argumenty) < 3:
-            posli_vystup("error", f"Chybí specifikace verze u příkazu '{prikaz}'.")
+        elif command in ("install", "uninstall", "start") and len(arguments) < 3:
+            send_output("error", f"Missing version specification for command '{command}'.")
         else:
-            # Pokud voláme akce nad verzí, provedeme překlad zástupného slova 'latest'
-            cilova_verze = resolve_version(argumenty[2])
+            # If we call actions on a version, resolve the 'latest' placeholder alias first
+            target_version = resolve_version(arguments[2])
             
-            if prikaz == "install":
-                install_version(cilova_verze)
-            elif prikaz == "uninstall":
-                uninstall_version(cilova_verze)
-            elif prikaz == "start":
-                # Bezpečné ošetření, pokud parametry pro start nebyly předány
-                parametry = resolve_version(argumenty[3]) if len(argumenty) > 3 else ""
-                start_version(cilova_verze, parametry)
+            if command == "install":
+                install_version(target_version)
+            elif command == "uninstall":
+                uninstall_version(target_version)
+            elif command == "start":
+                # Safe handling if parameters for start weren't passed
+                parameters = resolve_version(arguments[3]) if len(arguments) > 3 else ""
+                start_version(target_version, parameters)
             else:
-                posli_vystup("error", "Neznámý příkaz.")
+                send_output("error", "Unknown command.")
     else:
         if FORMAT_JSON:
-            posli_vystup("error", "Nebyl zadán žádný příkaz.")
+            send_output("error", "No command was specified.")
         else:
-            print("Použití:\n  python main.py <prikaz> [verze] [--json]")
+            print("Usage:\n  python main.py <command> [version] [--json]")

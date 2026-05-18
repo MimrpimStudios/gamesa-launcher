@@ -7,424 +7,446 @@ extends Control
 @onready var prereleases: CheckBox = $PreReleasesCheckBox
 @onready var force_install: CheckBox = $ForceInstallCheckBox
 @onready var progress_bar: ProgressBar = $ProgressBar
+@onready var progress_bar_label: Label = $ProgressBar/ProgressBarLabel
 
 var global_version = ProjectSettings.get_setting("application/config/version")
-var changelog_text = """Welcome to the new Gamesa launcher (version """ + str(global_version) + """)
-Now better by look and function"""
+var changelog_text = """Welcome to the new Gamesa launcher (version """ + str(global_version) + """). Now better by look and function.
 
-var data = null # Inicializujeme explicitně na null
+What is new?
+I do not know!
+But I'm actually the person who should know it...
+But I am not a person! I am RichTextLabel!
+And also I do not know what it means. Maybe it means I am rich label with text. But it is true I have a lot of text!
+
+Do you know what is prereleases and latest?
+Prereleases is updates that is  not stable and buggy (a lot). Latest is a newest version"""
+
+var data = null # Explicitly initialize as null
 var data_downloaded
-var cesta_k_exe: String = ""
-var vybrana_verze: String = "" # Globální proměnná pro vybranou verzi
-var ma_prerelease_volbu: bool
+var cli_exe_path: String = ""
+var selected_version: String = "" # Global variable for the selected version
+var has_prerelease_option: bool
 
-# Ikony pro různé typy verzí
+# Icons for different version types
 var latest = preload("uid://bdaly080dwtnr")
 var release = preload("uid://ca1xspl6ngldb")
 var prerelease = preload("uid://sg0lj3lbql4")
 
-# Sledování běžícího instalačního procesu na pozadí pomocí komunikační roury (pipe)
-var instalacni_pipe: Dictionary = {}
+# Tracking the running background installation process via communication pipe
+var install_pipe: Dictionary = {}
+var install_thread: Thread = null # Separate thread to safely read the pipe
 
-# Cesta ke konfiguračnímu souboru launcheru pro uložení nastavení a poslední vybrané verze
-var cesta_k_configu = "user://launcher_config.cfg"
+# Path to the launcher configuration file to save settings and the last selected version
+var config_path = "user://launcher_config.cfg"
 
-# Proměnná pro druhé vlákno (Thread)
+# Variable for the background initialization thread
 var bg_thread: Thread
 
-# Pomocná proměnná pro zjištění skutečného tagu verze, která odpovídá "latest" z JSONu
-var aktualni_skutecny_latest_tag: String = ""
-# Pomocná proměnná pro zjištění skutečného tagu verze, která odpovídá nejnovějšímu prerelease
-var aktualni_skutecny_latest_prerelease_tag: String = ""
-var aktualni_slozka_exe: String = ""
+# Helper variable to discover the actual version tag corresponding to "latest" from the JSON
+var current_actual_latest_tag: String = ""
+# Helper variable to discover the actual version tag corresponding to the newest prerelease
+var current_actual_latest_prerelease_tag: String = ""
+var current_exe_dir: String = ""
 
 func _ready() -> void:
 	if OS.has_feature("editor"):
-		# V editoru chceme pracovat s kořenem projektu
-		aktualni_slozka_exe = ProjectSettings.globalize_path("res://")
-		cesta_k_exe = aktualni_slozka_exe + "assets/bin/gamesa_launcher_cli.exe"
+		# In editor we want to work with project root
+		current_exe_dir = ProjectSettings.globalize_path("res://")
+		cli_exe_path = current_exe_dir + "assets/bin/gamesa_launcher_cli.exe"
 	else:
-		# Po exportu vezme reálnou složku vedle tvého vyexportovaného .exe
-		aktualni_slozka_exe = OS.get_executable_path().get_base_dir() + "/"
-		cesta_k_exe = aktualni_slozka_exe + "assets/bin/gamesa_launcher_cli.exe"
+		# When exported, it takes the real folder containing your exported .exe
+		current_exe_dir = OS.get_executable_path().get_base_dir() + "/"
+		cli_exe_path = current_exe_dir + "assets/bin/gamesa_launcher_cli.exe"
 		
-	print("Použitá složka: ", aktualni_slozka_exe)
+	print("Directory used: ", current_exe_dir)
 	
-	# Nastavení maximální velikosti ikon na rozměr běžného textu (16x16px)
+	# Restrict the maximum size of icons to match regular text (16x16px)
 	set_changelog()
 	var popup = version.get_popup()
 	popup.add_theme_constant_override("icon_max_width", 16)
 	version.add_theme_constant_override("icon_max_width", 16)
 
-	# Načtení předchozího stavu CheckBoxů z konfigurace
-	nacti_nastaveni_filtru()
+	# Load the previous state of checkboxes from config
+	load_filter_settings()
 
-	# Startujeme druhé vlákno pro asynchronní načítání z internetu a disku
+	if progress_bar_label:
+		progress_bar_label.text = ""
+
+	# Start the background thread for asynchronous loading from internet and disk
 	bg_thread = Thread.new()
 	bg_thread.start(_run_background_init)
 
-# Funkce, která běží na druhém vlákně a neblokuje GUI launcheru
+# CLEANUP BEFORE CLOSING THE LAUNCHER/GAME
+func _notification(what: int) -> void:
+	# Catches close requests from the OS window manager or launcher garbage collection
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		print("Launcher is closing, performing safe cleanup...")
+		terminate_install_monitoring()
+
+# Function running on a secondary thread that does not block the launcher's GUI
 func _run_background_init() -> void:
-	# 1. Aktualizace seznamu z GitHubu
-	var update_res = spusti_launcher(["update", "--json"])
+	# 1. Update version list from GitHub
+	var update_res = run_launcher(["update", "--json"])
 	if update_res != null and update_res.has("status"):
 		print("Update status: ", update_res["status"])
 	else:
-		print("Nepodařilo se provést update.")
+		print("Failed to perform update.")
 		
-	# 2. Získání všech verzí
-	var loaded_data = spusti_launcher(["versions", "--json"])
+	# 2. Get all available versions
+	var loaded_data = run_launcher(["versions", "--json"])
 	
-	# Pošleme data bezpečně zpět do hlavního vlákna Godotu
+	# Send data safely back to the main Godot thread
 	call_deferred("_on_background_init_finished", loaded_data)
 
-# Spustí se na hlavním vlákně, jakmile načítání na pozadí skončí
+# Triggers on the main thread once background loading finishes
 func _on_background_init_finished(loaded_data) -> void:
-	# Vyčistíme a ukončíme vlákno
+	# Clean up and join thread
 	if bg_thread:
 		bg_thread.wait_to_finish()
 		bg_thread = null
 		
 	data = loaded_data
 	if data != null and data.has("status") and data["status"] == "success":
-		print("Seznam verzí úspěšně načten.")
-		naplň_dropdown_verzi()
+		print("Version list successfully loaded.")
+		populate_version_dropdown()
 	else:
-		print("Nepodařilo se získat validní seznam verzí.")
+		print("Failed to retrieve a valid list of versions.")
 
 func _process(_delta: float) -> void:
-	# Pokud máme aktivní komunikační rouru, instalace běží na pozadí
-	if instalacni_pipe.has("stdio"):
-		var pipe = instalacni_pipe["stdio"] as FileAccess
-		
-		# Čteme řádky z konzole Pythonu, dokud nějaké jsou k dispozici
-		while pipe.get_error() == OK and pipe.get_len() > 0:
-			var radek = pipe.get_line().strip_edges()
-			if radek == "": continue
-			
-			# Pokusíme se řádek zpracovat jako JSON poslaný z Pythonu
-			var json = JSON.new()
-			if json.parse(radek) == OK:
-				var res = json.data
-				if res is Dictionary:
-					# Chytáme stav stahování pro progress bar
-					if res.get("status") == "progress":
-						var procenta = res.get("percent", 0)
-						if procenta >= 0:
-							progress_bar.value = procenta
-							
-					# Chytáme finální úspěch nebo chybu
-					elif res.get("status") == "success":
-						print("Instalace dokončena: ", res.get("message"))
-						ukonci_sledovani_instalace()
-					elif res.get("status") == "error":
-						print("Chyba při instalaci: ", res.get("message"))
-						ukonci_sledovani_instalace()
-
-		# Kontrola, zda proces na pozadí mezitím neumřel (např. neočekávaný crash)
-		var pid = instalacni_pipe.get("pid", -1)
+	# We no longer read the pipe in _process (a dedicated thread handles it).
+	# We only monitor if the background process died unexpectedly.
+	if install_pipe.has("pid"):
+		var pid = install_pipe.get("pid", -1)
 		if pid != -1 and not OS.is_process_running(pid):
-			# Proces skončil, ale nestihl poslat finální JSON (nebo spadl)
-			ukonci_sledovani_instalace()
+			terminate_install_monitoring()
 
-# Pomocná funkce pro vyčištění stavu po instalaci
-func ukonci_sledovani_instalace() -> void:
-	if instalacni_pipe.has("stdio"):
-		instalacni_pipe["stdio"].close()
-	instalacni_pipe = {}
+# Running on an independent thread, constantly listening to the Python output
+func _threaded_pipe_reader(pipe: FileAccess) -> void:
+	while pipe.is_open() and pipe.get_error() == OK:
+		var line = pipe.get_line()
+		
+		# If we hit the end of the stream, break out of the loop
+		if line == "" and pipe.get_error() != OK:
+			break
+			
+		# Safely pass the line to the main thread for processing
+		call_deferred("_process_python_line", line.strip_edges())
+	
+	# Safe shutdown of monitoring from the main thread when done
+	call_deferred("terminate_install_monitoring")
+
+# Processing lines sent from the background on the main thread (UI thread-safe)
+func _process_python_line(line: String) -> void:
+	if line == "": return
+	
+	var json = JSON.new()
+	if json.parse(line) == OK:
+		var res = json.data
+		if res is Dictionary:
+			# Capture download progress for the progress bar and text label
+			if res.get("status") == "progress":
+				var percentage = res.get("percent", 0)
+				if percentage >= 0:
+					progress_bar.value = percentage
+					if progress_bar_label:
+						progress_bar_label.text = "Downloading: " + str(percentage) + " %"
+				else:
+					if progress_bar_label:
+						progress_bar_label.text = "Downloading (size unknown)..."
+					
+			# Capture final success or download error states
+			elif res.get("status") == "success":
+				print("Installation completed: ", res.get("message"))
+				if progress_bar_label:
+					progress_bar_label.text = "Installation completed successfully!"
+			elif res.get("status") == "error":
+				print("Installation error: ", res.get("message"))
+				if progress_bar_label:
+					progress_bar_label.text = "Error: " + str(res.get("message"))
+
+# Helper function to clear state after installation and when quitting
+func terminate_install_monitoring() -> void:
+	if install_pipe.is_empty() and install_thread == null:
+		return
+
+	# PROCESS SAFEGUARD: If the process is still running, kill it directly (e.g. if the launcher closes)
+	if install_pipe.has("pid"):
+		var pid = install_pipe["pid"]
+		if pid != -1 and OS.is_process_running(pid):
+			print("Terminating background download process (PID: ", pid, ")...")
+			OS.kill(pid)
+
+	if install_pipe.has("stdio"):
+		install_pipe["stdio"].close()
+	
+	install_pipe = {}
+	
+	# If the thread is still active, safely wait for it to join and clear it
+	if install_thread:
+		if install_thread.is_started():
+			install_thread.wait_to_finish()
+		install_thread = null
+		
 	play.disabled = false
 	progress_bar.value = 0
+	if progress_bar_label:
+		# If installation was aborted by user/crash, clear the label after a moment
+		if progress_bar_label.text.begins_with("Downloading"):
+			progress_bar_label.text = ""
+			
 	_on_version_option_button_item_selected(version.selected)
 
-func spusti_launcher(prikazy: Array) -> Dictionary:
-	var globalni_cesta = ProjectSettings.globalize_path(cesta_k_exe)
+func run_launcher(commands: Array) -> Dictionary:
+	var global_path = ProjectSettings.globalize_path(cli_exe_path)
 	
-	if not FileAccess.file_exists(globalni_cesta):
-		print("Chyba: Soubor neexistuje na cestě: ", globalni_cesta)
+	if not FileAccess.file_exists(global_path):
+		print("Error: File does not exist at path: ", global_path)
 		return {}
 		
-	var vystup = []
-	var exit_code = OS.execute(globalni_cesta, prikazy, vystup, true, false)
+	var output = []
+	var exit_code = OS.execute(global_path, commands, output, true, false)
 	
-	if exit_code == 0 and vystup.size() > 0:
-		var surový_text = vystup[0]
+	if exit_code == 0 and output.size() > 0:
+		var raw_text = output[0]
 		var json = JSON.new()
-		var chyba = json.parse(surový_text)
+		var error = json.parse(raw_text)
 		
-		if chyba == OK:
+		if error == OK:
 			return json.data
 		else:
-			print("Chyba parsování JSONu: ", json.get_error_message())
+			print("JSON Parsing Error: ", json.get_error_message())
 			return {}
 	else:
-		print("Spuštění selhalo. Exit kód: ", exit_code)
+		print("Execution failed. Exit code: ", exit_code)
 		return {}
 
-func naplň_dropdown_verzi() -> void:
-	# Ošetření chyby: Pokud data ještě nebyla stažena/připravena, neprovádíme plnění
+func populate_version_dropdown() -> void:
 	if data == null:
 		return
 		
 	version.clear()
 	
 	if data.has("data") and data["data"].has("versions") and data["data"]["versions"] is Array:
-		var pole_verzi = data["data"]["versions"]
+		var versions_array = data["data"]["versions"]
 		
-		# Vyhledáme nejnovější stabilní verzi (typ "latest") a nejnovější prerelease
-		aktualni_skutecny_latest_tag = ""
-		aktualni_skutecny_latest_prerelease_tag = ""
+		# Find the latest stable version (type "latest") and latest prerelease
+		current_actual_latest_tag = ""
+		current_actual_latest_prerelease_tag = ""
 		
-		for polozka in pole_verzi:
-			var typ = polozka.get("type", "")
-			var jmeno = polozka.get("name", "")
-			if typ == "latest":
-				aktualni_skutecny_latest_tag = jmeno
-			elif typ == "prerelease" and aktualni_skutecny_latest_prerelease_tag == "":
-				# První nalezený pre-release je ten nejnovější
-				aktualni_skutecny_latest_prerelease_tag = jmeno
+		for item in versions_array:
+			var ver_type = item.get("type", "")
+			var name = item.get("name", "")
+			if ver_type == "latest":
+				current_actual_latest_tag = name
+			elif ver_type == "prerelease" and current_actual_latest_prerelease_tag == "":
+				current_actual_latest_prerelease_tag = name
 		
-		# Pokud se žádná "latest" nenašla, použijeme jako zálohu první v poli
-		if aktualni_skutecny_latest_tag == "" and pole_verzi.size() > 0:
-			aktualni_skutecny_latest_tag = pole_verzi[0].get("name", "")
+		if current_actual_latest_tag == "" and versions_array.size() > 0:
+			current_actual_latest_tag = versions_array[0].get("name", "")
 
-		# Načteme si uloženou verzi z minulého spuštění
-		var posledni_vybrana_verze = nacti_ulozenou_verzi()
-		var index_k_vyberu = 0 # Výchozí index je první (tedy možnost "Latest")
-		var zobrazeny_idx = 0
+		var last_selected_version = load_saved_version()
+		var index_to_select = 0
+		var display_idx = 0
 		
-		# PRVNÍ KROK: Do dropdownu přidáme virtuální/zástupnou volbu "Latest"
 		version.add_item("Latest")
 		if latest:
 			version.set_item_icon(0, latest)
 		
-		# Pokud si konfigurace pamatuje z minula "Latest" nebo soubor neexistuje
-		if posledni_vybrana_verze == "Latest" or posledni_vybrana_verze == "":
-			index_k_vyberu = 0
+		if last_selected_version == "Latest" or last_selected_version == "":
+			index_to_select = 0
 			
-		zobrazeny_idx += 1
+		display_idx += 1
 		
-		# DRUHÝ KROK: Přidáme virtuální volbu "Latest Prerelease", pokud jsou pre-releasy povolené
-		ma_prerelease_volbu = false
-		if prereleases and prereleases.button_pressed and aktualni_skutecny_latest_prerelease_tag != "":
-			ma_prerelease_volbu = true
+		has_prerelease_option = false
+		if prereleases and prereleases.button_pressed and current_actual_latest_prerelease_tag != "":
+			has_prerelease_option = true
 			version.add_item("Latest Prerelease")
 			if prerelease:
-				version.set_item_icon(zobrazeny_idx, prerelease)
+				version.set_item_icon(display_idx, prerelease)
 			
-			if posledni_vybrana_verze == "Latest Prerelease":
-				index_k_vyberu = zobrazeny_idx
+			if last_selected_version == "Latest Prerelease":
+				index_to_select = display_idx
 				
-			zobrazeny_idx += 1
+			display_idx += 1
 		
-		# TŘETÍ KROK: Přidáme všechny konkrétní verze
-		for idx in range(pole_verzi.size()):
-			var polozka = pole_verzi[idx]
-			var jmeno_verze = polozka.get("name", "Neznámá")
-			var typ_verze = polozka.get("type", "release")
+		for idx in range(versions_array.size()):
+			var item = versions_array[idx]
+			var version_name = item.get("name", "Unknown")
+			var version_type = item.get("type", "release")
 			
-			# Filtrování pre-releasů na základě stavu CheckBoxu
-			if typ_verze == "prerelease" and prereleases and not prereleases.button_pressed:
-				continue # Přeskočíme tuto verzi
+			if version_type == "prerelease" and prereleases and not prereleases.button_pressed:
+				continue
 			
-			# Přidáme text verze do OptionButtonu
-			version.add_item(jmeno_verze)
+			version.add_item(version_name)
 			
-			# Vybereme správnou ikonku podle typu z preloadu
-			match typ_verze:
+			match version_type:
 				"latest":
-					if latest: version.set_item_icon(zobrazeny_idx, latest)
+					if latest: version.set_item_icon(display_idx, latest)
 				"prerelease":
-					if prerelease: version.set_item_icon(zobrazeny_idx, prerelease)
+					if prerelease: version.set_item_icon(display_idx, prerelease)
 				"release":
-					if release: version.set_item_icon(zobrazeny_idx, release)
+					if release: version.set_item_icon(display_idx, release)
 			
-			# Pokud tato verze odpovídá té, kterou hráč vybral minule, uložíme si její index
-			if jmeno_verze == posledni_vybrana_verze:
-				index_k_vyberu = zobrazeny_idx
+			if version_name == last_selected_version:
+				index_to_select = display_idx
 				
-			zobrazeny_idx += 1
+			display_idx += 1
 			
 		if version.item_count > 0:
-			# Ochrana proti přetečení indexu po změně filtrů
-			if index_k_vyberu >= version.item_count:
-				index_k_vyberu = 0
+			if index_to_select >= version.item_count:
+				index_to_select = 0
 				
-			# Vybereme index a vyvoláme změnu GUI prvků
-			version.selected = index_k_vyberu
-			_on_version_option_button_item_selected(index_k_vyberu)
+			version.selected = index_to_select
+			_on_version_option_button_item_selected(index_to_select)
 			
-		print("OptionButton byl úspěšně naplněn ", version.item_count, " verzemi s ikonami.")
+		print("OptionButton populated successfully with ", version.item_count, " versions.")
 	else:
-		print("Chyba: Data neobsahují platný strukturovaný seznam verzí pod klíčem data.versions.")
+		print("Error: Data does not contain a valid structured version list.")
 
 func _on_version_option_button_item_selected(index: int) -> void:
 	if index < 0 or index >= version.item_count: return
-	vybrana_verze = version.get_item_text(index)
+	selected_version = version.get_item_text(index)
+	save_selected_version(selected_version)
 	
-	# Uložíme aktuální výběr na disk pro příští spuštění hry
-	uloz_vybranou_verzi(vybrana_verze)
+	var tested_version = selected_version
+	if selected_version == "Latest":
+		tested_version = current_actual_latest_tag
+	elif selected_version == "Latest Prerelease":
+		tested_version = current_actual_latest_prerelease_tag
 	
-	# Vyhodnocení zástupných textů na reálné tagy verzí pro kontrolu instalace
-	var testovana_verze = vybrana_verze
-	if vybrana_verze == "Latest":
-		testovana_verze = aktualni_skutecny_latest_tag
-	elif vybrana_verze == "Latest Prerelease":
-		testovana_verze = aktualni_skutecny_latest_prerelease_tag
-	
-	# Zkontrolujeme, zda je verze již nainstalovaná
-	var data_installed = spusti_launcher(["installed", "--json"])
+	var data_installed = run_launcher(["installed", "--json"])
 	if data_installed != null and data_installed.get("status") == "success":
-		var stazene = data_installed["data"].get("installed", [])
-		if testovana_verze in stazene:
-			# Pokud je vynucená instalace aktivní, chceme povolit opětovné stažení/reinstalaci
+		var downloaded = data_installed["data"].get("installed", [])
+		if tested_version in downloaded:
 			if force_install and force_install.button_pressed:
-				play.text = "Reinstalovat"
+				play.text = "Reinstall"
 			else:
-				play.text = "Spustit hru"
+				play.text = "Launch Game"
 		else:
-			play.text = "Stáhnout a instalovat"
+			play.text = "Download and Install"
 
 func _on_play_button_pressed() -> void:
-	if vybrana_verze == "": return
+	if selected_version == "": return
+	if install_pipe.has("stdio"): return
 	
-	# Pokud zrovna probíhá stahování, zamezíme dalšímu klikání
-	if instalacni_pipe.has("stdio"): return
-	
-	var globalni_cesta = ProjectSettings.globalize_path(cesta_k_exe)
+	var global_path = ProjectSettings.globalize_path(cli_exe_path)
+	var command_version = selected_version
+	if selected_version == "Latest":
+		command_version = current_actual_latest_tag
+	elif selected_version == "Latest Prerelease":
+		command_version = current_actual_latest_prerelease_tag
 
-	# Přeložíme zástupný text na skutečný tag verze, který pošleme do CLI příkazu
-	var verze_pro_prikaz = vybrana_verze
-	if vybrana_verze == "Latest":
-		verze_pro_prikaz = aktualni_skutecny_latest_tag
-	elif vybrana_verze == "Latest Prerelease":
-		verze_pro_prikaz = aktualni_skutecny_latest_prerelease_tag
-
-	if play.text == "Stáhnout a instalovat" or play.text == "Reinstalovat":
+	if play.text == "Download and Install" or play.text == "Reinstall":
 		play.disabled = true
-		progress_bar.value = 0 # Resetujeme bar
+		progress_bar.value = 0
 		
-		# Pokud děláme Force Install, nejprve staré soubory verze odinstalujeme
-		if play.text == "Reinstalovat" or (force_install and force_install.button_pressed):
-			play.text = "Odinstalování staré verze..."
-			print("Force Install: Odinstalovávám verzi ", verze_pro_prikaz)
-			var uninstall_res = spusti_launcher(["uninstall", verze_pro_prikaz, "--json"])
+		if play.text == "Reinstall" or (force_install and force_install.button_pressed):
+			play.text = "Uninstalling..."
+			if progress_bar_label:
+				progress_bar_label.text = "Uninstalling older version..."
+			var uninstall_res = run_launcher(["uninstall", command_version, "--json"])
 			if uninstall_res != null and uninstall_res.get("status") == "success":
-				print("Stará verze úspěšně odinstalována.")
-			else:
-				print("Předběžná odinstalace nebyla nutná, pokračuji ve stahování.")
+				print("Old version successfully uninstalled.")
 
-		play.text = "Stahování..."
+		play.text = "Downloading..."
+		if progress_bar_label:
+			progress_bar_label.text = "Preparing download..."
 		
-		# Spouštíme proces přes rouru (pipe), abychom v _process() zachytávali procenta stahování
-		instalacni_pipe = OS.execute_with_pipe(globalni_cesta, ["install", verze_pro_prikaz, "--json"])
+		# Execute background process with output pipe
+		install_pipe = OS.execute_with_pipe(global_path, ["install", command_version, "--json"])
 		
-		if instalacni_pipe.has("stdio") and instalacni_pipe.get("pid", -1) != -1:
-			print("Instalace verze ", verze_pro_prikaz, " úspěšně spuštěna na pozadí (PID: ", instalacni_pipe["pid"], ")")
+		if install_pipe.has("stdio") and install_pipe.get("pid", -1) != -1:
+			print("Installation launched in the background under PID: ", install_pipe["pid"])
+			# Start background thread to read pipe and keep GUI interactive
+			install_thread = Thread.new()
+			install_thread.start(_threaded_pipe_reader.bind(install_pipe["stdio"]))
 		else:
-			print("Kritická chyba: Nepodařilo se vytvořit instalační proces.")
-			ukonci_sledovani_instalace()
+			print("Critical error: Failed to initialize installation process.")
+			if progress_bar_label:
+				progress_bar_label.text = "Failed to launch installer!"
+			terminate_install_monitoring()
 			
-	elif play.text == "Spustit hru":
-		print("Spouštím hru...")
-		
-		# Spouštěcí argumenty pro CLI/GUI launchery hry Gamesa
+	elif play.text == "Launch Game":
+		print("Launching game...")
 		var extra_args_string = "-launcherGUI -versionGUI=" + str(global_version)
-		
-		# Parametry předané jako pole v OS.execute()
-		var parametry = [
-			"start", 
-			verze_pro_prikaz, 
-			extra_args_string
-		]
-		
-		# Prázdné pole pro případný textový výstup
-		var vystup = []
-		
-		# Správné neblokující spuštění hry (cesta, parametry, výstup)
-		var exit_code = OS.execute(globalni_cesta, parametry, vystup, true, false)
-		
+		var parameters = ["start", command_version, extra_args_string]
+		var output = []
+		var exit_code = OS.execute(global_path, parameters, output, true, false)
 		if exit_code == 0:
-			print("Hra úspěšně nahozena.")
+			print("Game successfully launched.")
 		else:
-			print("Hru se nepodařilo spustit. Exit kód: ", exit_code)
+			print("Failed to start the game. Exit code: ", exit_code)
 
 func _on_uninstall_button_pressed() -> void:
-	if vybrana_verze == "":
-		print("Chyba: Není vybrána žádná verze pro odinstalaci.")
-		return
-		
-	# Pokud zrovna probíhá stahování jiné verze, odinstalaci zablokujeme
-	if instalacni_pipe.has("stdio"):
-		print("Nelze odinstalovat hru, dokud běží stahování.")
-		return
+	if selected_version == "": return
+	if install_pipe.has("stdio"): return
 
-	# Přeložíme zástupný text na skutečný tag verze
-	var verze_pro_prikaz = vybrana_verze
-	if vybrana_verze == "Latest":
-		verze_pro_prikaz = aktualni_skutecny_latest_tag
-	elif vybrana_verze == "Latest Prerelease":
-		verze_pro_prikaz = aktualni_skutecny_latest_prerelease_tag
+	var command_version = selected_version
+	if selected_version == "Latest":
+		command_version = current_actual_latest_tag
+	elif selected_version == "Latest Prerelease":
+		command_version = current_actual_latest_prerelease_tag
 
-	print("Zahajuji odinstalaci verze: ", verze_pro_prikaz)
+	print("Initializing uninstallation for version: ", command_version)
+	if progress_bar_label:
+		progress_bar_label.text = "Uninstalling version " + command_version + "..."
 	
-	# Zavoláme launcher s příkazem pro smazání verze
-	var uninstall_res = spusti_launcher(["uninstall", verze_pro_prikaz, "--json"])
+	var uninstall_res = run_launcher(["uninstall", command_version, "--json"])
 	
 	if uninstall_res != null and uninstall_res.has("status"):
 		if uninstall_res["status"] == "success":
-			print("Odinstalace úspěšná: ", uninstall_res.get("message", ""))
-			# Obnovíme stav hlavního tlačítka (přepne se zpět na "Stáhnout a instalovat")
+			print("Uninstall successful: ", uninstall_res.get("message", ""))
+			if progress_bar_label:
+				progress_bar_label.text = "Uninstall completed!"
 			_on_version_option_button_item_selected(version.selected)
 		else:
-			print("Odinstalace selhala: ", uninstall_res.get("message", "Neznámá chyba."))
+			print("Uninstall failed: ", uninstall_res.get("message", ""))
+			if progress_bar_label:
+				progress_bar_label.text = "Failed to delete files."
 	else:
-		print("Kritická chyba: Launcher neodpověděl validním JSONem.")
+		print("Critical error: CLI failed to reply with valid JSON.")
+		if progress_bar_label:
+			progress_bar_label.text = "CLI communication error."
 
-# Signál pro změnu zobrazení Pre-releasů v menu
 func _on_prereleases_toggled(_button_pressed: bool) -> void:
-	uloz_nastaveni_filtru()
-	naplň_dropdown_verzi()
+	save_filter_settings()
+	populate_version_dropdown()
 
-# Signál pro změnu vynucené reinstalace
 func _on_force_install_toggled(_button_pressed: bool) -> void:
-	uloz_nastaveni_filtru()
+	save_filter_settings()
 	if version.item_count > 0:
 		_on_version_option_button_item_selected(version.selected)
 
-# Pomocná funkce: Uložení vybrané verze do lokální konfigurace launcheru
-func uloz_vybranou_verzi(nazev_verze: String) -> void:
+func save_selected_version(version_name: String) -> void:
 	var config = ConfigFile.new()
-	config.load(cesta_k_configu) # Načteme stávající nastavení
-	config.set_value("Nastaveni", "posledni_verze", nazev_verze)
-	config.save(cesta_k_configu)
+	config.load(config_path)
+	config.set_value("Settings", "last_version", version_name)
+	config.save(config_path)
 
-# Pomocná funkce: Načtení naposledy vybrané verze z konfigurace
-func nacti_ulozenou_verzi() -> String:
+func load_saved_version() -> String:
 	var config = ConfigFile.new()
-	var chyba = config.load(cesta_k_configu)
-	if chyba == OK:
-		return config.get_value("Nastaveni", "posledni_verze", "")
+	var error = config.load(config_path)
+	if error == OK:
+		return config.get_value("Settings", "last_version", "")
 	return ""
 
-# Pomocná funkce: Uložení stavu filtrů a nastavení do konfigurace
-func uloz_nastaveni_filtru() -> void:
+func save_filter_settings() -> void:
 	var config = ConfigFile.new()
-	config.load(cesta_k_configu)
+	config.load(config_path)
 	if prereleases:
-		config.set_value("Filtry", "prereleases", prereleases.button_pressed)
+		config.set_value("Filters", "prereleases", prereleases.button_pressed)
 	if force_install:
-		config.set_value("Filtry", "force_install", force_install.button_pressed)
-	config.save(cesta_k_configu)
+		config.set_value("Filters", "force_install", force_install.button_pressed)
+	config.save(config_path)
 
-# Pomocná funkce: Načtení nastavení a uplatnění na CheckBoxech
-func nacti_nastaveni_filtru() -> void:
+func load_filter_settings() -> void:
 	var config = ConfigFile.new()
-	var chyba = config.load(cesta_k_configu)
-	if chyba == OK:
+	var error = config.load(config_path)
+	if error == OK:
 		if prereleases:
-			prereleases.button_pressed = config.get_value("Filtry", "prereleases", true)
+			prereleases.button_pressed = config.get_value("Filters", "prereleases", true)
 		if force_install:
-			force_install.button_pressed = config.get_value("Filtry", "force_install", false)
+			force_install.button_pressed = config.get_value("Filters", "force_install", false)
 
 func _on_close_texture_button_pressed() -> void:
 	get_tree().quit(0)
