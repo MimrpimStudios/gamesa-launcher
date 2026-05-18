@@ -7,6 +7,9 @@ extends Control
 @onready var prereleases: CheckBox = $PreReleasesCheckBox
 @onready var force_install: CheckBox = $ForceInstallCheckBox
 
+var global_version = ProjectSettings.get_setting("application/config/version")
+var changelog_text = """																Welcome to the new Gamesa launcher (version """ + str(global_version) + """)
+																				Now better by look and function"""
 var data = null # Inicializujeme explicitně na null
 var data_downloaded
 var cesta_k_exe = "res://assets/bin/gamesa_launcher_cli.exe"
@@ -33,6 +36,7 @@ var aktualni_skutecny_latest_prerelease_tag: String = ""
 
 func _ready():
 	# Nastavení maximální velikosti ikon na rozměr běžného textu (16x16px)
+	set_changelog()
 	var popup = version.get_popup()
 	popup.add_theme_constant_override("icon_max_width", 16)
 	version.add_theme_constant_override("icon_max_width", 16)
@@ -276,16 +280,29 @@ func _on_play_button_pressed() -> void:
 			print("Kritická chyba: Nepodařilo se vytvořit instalační proces.")
 			play.disabled = false
 			_on_version_option_button_item_selected(version.selected)
-
 	elif play.text == "Spustit hru":
-		print("Spouštím hru...")
-		var vystup = []
-		var exit_code = OS.execute(globalni_cesta, ["start", verze_pro_prikaz], vystup, true, false)
-		
-		if exit_code == 0:
-			print("Hra úspěšně nahozena.")
-		else:
-			print("Hru se nepodařilo spustit.")
+			print("Spouštím hru...")
+			
+			# Tady máš svůj string přesně tak, jak jsi potřeboval
+			var extra_args_string = "-launcherGUI -versionGUI=" + str(global_version)
+			
+			# Všechno posíláme jako parametry v poli pro OS.execute
+			var parametry = [
+				"start", 
+				verze_pro_prikaz, 
+				extra_args_string # Godot toto předá jako jeden ucelený textový argument
+			]
+			
+			# Prázdné pole pro zachycení textového výstupu (přesunuto na správnou pozici)
+			var vystup = []
+			
+			# Správné volání: cesta, pole parametrů, pole pro výstup
+			var exit_code = OS.execute(globalni_cesta, parametry, vystup, true, false)
+			
+			if exit_code == 0:
+				print("Hra úspěšně nahozena.")
+			else:
+				print("Hru se nepodařilo spustit. Exit kód: ", exit_code)
 
 func _on_uninstall_button_pressed() -> void:
 	if vybrana_verze == "":
@@ -369,3 +386,6 @@ func nacti_nastaveni_filtru() -> void:
 
 func _on_close_texture_button_pressed() -> void:
 	get_tree().quit(0)
+
+func set_changelog():
+	changelog.set_text(changelog_text)
