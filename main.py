@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 
-cli_version = "0.0.1"
+cli_version = "0.0.2"
 APPDATA = platformdirs.user_data_dir("Gamesa_launcher")
 os.makedirs(APPDATA, exist_ok=True)
 
@@ -282,7 +282,7 @@ def uninstall_version(version: str):
 
 def start_version(version: str, parametry: str = ""):
     """Spustí hru bezpečně, nezávisle a ve správném pracovním adresáři."""
-    parametry = parametry + f" -launcherCLI --versionCLI={cli_version}"
+    parametry = parametry.strip() + f" -launcherCLI -versionCLI={cli_version}"
     cilova_slozka_hry = os.path.join(SLOZKA_VERSIONS, f"Gamesa_{version}")
     spustitelny_soubor = os.path.join(cilova_slozka_hry, "Gamesa.exe")
     print(str(parametry))
