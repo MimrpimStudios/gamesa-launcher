@@ -11,7 +11,7 @@ var data = null # Inicializujeme explicitně na null
 var data_downloaded
 var cesta_k_exe = "res://assets/bin/gamesa_launcher_cli.exe"
 var vybrana_verze: String = "" # Globální proměnná pro vybranou verzi
-
+var ma_prerelease_volbu: bool
 # Ikony pro různé typy verzí
 var latest = preload("uid://bdaly080dwtnr")
 var release = preload("uid://ca1xspl6ngldb")
@@ -38,10 +38,6 @@ func _ready():
 	version.add_theme_constant_override("icon_max_width", 16)
 
 	# Propojení signálů pro filtry a vynucenou instalaci
-	if prereleases:
-		prereleases.toggled.connect(_on_prereleases_toggled)
-	if force_install:
-		force_install.toggled.connect(_on_force_install_toggled)
 
 	# Načtení předchozího stavu CheckBoxů z konfigurace
 	nacti_nastaveni_filtru()
@@ -161,7 +157,7 @@ func naplň_dropdown_verzi() -> void:
 		zobrazeny_idx += 1
 		
 		# DRUHÝ KROK: Přidáme virtuální volbu "Latest Prerelease", pokud jsou pre-releasy povolené
-		var ma_prerelease_volbu = false
+		ma_prerelease_volbu = false
 		if prereleases and prereleases.button_pressed and aktualni_skutecny_latest_prerelease_tag != "":
 			ma_prerelease_volbu = true
 			version.add_item("Latest Prerelease")
@@ -369,3 +365,7 @@ func nacti_nastaveni_filtru() -> void:
 			prereleases.button_pressed = config.get_value("Filtry", "prereleases", true)
 		if force_install:
 			force_install.button_pressed = config.get_value("Filtry", "force_install", false)
+
+
+func _on_close_texture_button_pressed() -> void:
+	get_tree().quit(0)
